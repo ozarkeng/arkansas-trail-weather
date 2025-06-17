@@ -1,22 +1,21 @@
-# Start from the official Airflow image that matches my docker-compose.yaml
+# Start from the official Airflow image you are using
 FROM apache/airflow:3.0.2
 
-# Switch to the root user to install system-level packages
+# Switch to the root user to install system-level dependencies for GeoPandas
 USER root
-
-# Install OS-level build tools and the GDAL development library needed for geospatial packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3-dev \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gdal-bin \
     libgdal-dev \
-&& rm -rf /var/lib/apt/lists/*
+    g++ && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Switch back to the non-root airflow user for the rest of the build and for runtime security
+# Switch back to the non-root 'airflow' user for better security
 USER airflow
 
-# Copy your project's requirements file into the image
-COPY requirements.txt .
+# Copy the requirements file from your project root into the image
+COPY requirements.txt /
 
-# Install your Python packages as the 'airflow' user.
-# This will succeed because the underlying build tools are now available.
-RUN pip install --no-cache-dir -r requirements.txt
+# Install the Python packages listed in the requirements file
+RUN pip install --no-cache-dir -r /requirements.txt

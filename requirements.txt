@@ -1,4 +1,3 @@
 geopandas
-python-dotenv
-psycopg2-binary
-SQLAlchemy
+requests
+geoalchemy2

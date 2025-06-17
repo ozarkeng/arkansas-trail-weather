@@ -44,22 +44,24 @@ def geospatial_data_ingestion_dag():
 
     # --- 3. DEFINE TASKS ---
     @task
-    def download_zip_file(url: str, download_dir: Path) -> Path:
-        """Downloads a file from a URL and saves it locally."""
+    def download_zip_file(url: str, download_dir: Path) -> str:
+        """Downloads a file from a URL and saves it locally.
+        NOTE: Airflow does not support Path objects directly in tasks -> convert to str.
+        """
         download_dir.mkdir(parents=True, exist_ok=True)
         zip_filename = url.split("/")[-1]
         zip_filepath = download_dir / zip_filename
 
-        with requests.get(url, stream=True) as r:
+        with requests.get(url, stream=True, verify=False) as r:
             r.raise_for_status()
             with open(zip_filepath, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-        return zip_filepath
+        return str(zip_filepath)
 
     @task
     def load_zip_to_postgis(
-        zip_filepath: Path, schema_name: str, table_name: str, conn_id: str
+        zip_filepath: str, schema_name: str, table_name: str, conn_id: str
     ):
         """Loads a shapefile from a ZIP archive directly into a PostGIS table."""
         # GeoPandas reads the shapefile from within the zip file.
@@ -84,17 +86,15 @@ def geospatial_data_ingestion_dag():
         print(f"Successfully loaded {len(gdf)} records into {schema_name}.{table_name}")
 
     @task
-    def cleanup_zip_file(zip_filepath: Path):
+    def cleanup_zip_file(zip_filepath: str):
         """Deletes the downloaded zip file."""
         os.remove(zip_filepath)
         print(f"Cleaned up {zip_filepath}.")
 
     # --- 5. CREATE DYNAMIC TASKS AND SET DEPENDENCIES ---
     for name, config in DATASETS.items():
-        dataset_dir = DATA_DIR / name
-
         # Download the zip file
-        zip_file_path = download_zip_file(url=config["url"], download_dir=dataset_dir)
+        zip_file_path = download_zip_file(url=config["url"], download_dir=DATA_DIR)
 
         # Pass the zip file path directly to the loading task
         load_task = load_zip_to_postgis(
