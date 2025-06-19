@@ -1,3 +1,5 @@
 geopandas
 requests
 geoalchemy2
+pandas
+python-dotenv
