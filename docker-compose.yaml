@@ -360,6 +360,23 @@ services:
   #    airflow-init:
   #      condition: service_completed_successfully
 
+  streamlit-app:
+    build: ./app
+    container_name: streamlit-app
+    restart: always
+    ports:
+      - "8501:8501"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres-gis
+      - POSTGRES_PORT=5432
+    depends_on:
+      # Ensures the app won't start until the database it needs is healthy
+      postgres-gis:
+        condition: service_healthy
+
 volumes:
   postgres-airflow-volume:
   postgres-gis-volume:
