@@ -5,20 +5,20 @@ import geopandas as gpd
 import pandas as pd
 import pendulum
 import requests
+from airflow.sdk import Variable
 from airflow.decorators import dag, task
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from dotenv import load_dotenv
 from sqlalchemy import text
 
-load_dotenv()
 
 # --- 1. PARAMS ---
 URL = "https://api.openweathermap.org/data/2.5/weather"
-API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+API_KEY = Variable.get("OPENWEATHER_API_KEY")
+POSTGRES_CONN_ID = "postgis_data_db"
 UPDATED_DATE = pendulum.now("America/Chicago")
 CONFIG_FILEPATH = Path("/opt/airflow/dags/data/arkansas_trails.csv")
 # CONFIG_FILEPATH = Path("airflow/dags/data/arkansas_trails.csv")
-POSTGRES_CONN_ID = "postgis_data_db"
+OPENWEATHER_CONN_ID = "openweather_api"
 SCHEMA_NAME = "arkansas_trails"
 TABLE_NAME = "current_weather"
 DEFAULT_PARAMS = {
@@ -140,14 +140,14 @@ def process_weather_data(extracted_data: dict):
     extracted_data["updated_date_tz"] = format_timestamp(updated_date)
     extracted_data["sunrise_time_tz"] = format_timestamp(sunrise_time)
     extracted_data["sunset_time_tz"] = format_timestamp(sunset_time)
-    extracted_data["updated_date"] = decode_timestamp(updated_date)
-    extracted_data["sunrise_time"] = decode_timestamp(sunrise_time)
-    extracted_data["sunset_time"] = decode_timestamp(sunset_time)
+    extracted_data["updated_date"] = decode_timestamp(updated_date).isoformat()
+    extracted_data["sunrise_time"] = decode_timestamp(sunrise_time).isoformat()
+    extracted_data["sunset_time"] = decode_timestamp(sunset_time).isoformat()
 
     return extracted_data
 
 
-def dataframe_to_geodataframe(df: pd.DataFrame) -> gpd.GeoDataFrame:
+def dataframe_to_geodataframe(df: pd.DataFrame):
     """Converts a DataFrame with 'lon' and 'lat' columns to a GeoDataFrame."""
     if "lon" not in df.columns or "lat" not in df.columns:
         raise ValueError("DataFrame must contain 'lon' and 'lat' columns.")
@@ -162,11 +162,10 @@ def dataframe_to_geodataframe(df: pd.DataFrame) -> gpd.GeoDataFrame:
 # --- DAG ---
 # ==========================
 @dag(
-    schedule_interval=None,
     start_date=pendulum.datetime(2025, 6, 19, tz="America/Chicago"),
-    schedule="*/5 * * * *",  # Every 5 minutes
     catchup=False,
     tags=["geospatial", "weather"],
+    schedule="*/5 * * * *",
     doc_md="""
     ### Arkansas Trail Current Weather dag
     This DAG fetches current weather data for Arkansas trailheads and stores it in a PostGIS database.
@@ -202,11 +201,17 @@ def arkansas_trail_current_weather_dag():
         weather_df = pd.DataFrame(weather_data_list)
         weather_gdf = dataframe_to_geodataframe(weather_df)
 
-        return weather_gdf
+        # Airflow cannot serialize a complex object like a GeoDataFrame directly
+        # So we convert it to GeoJSON for serialization
+        return weather_gdf.to_json()
 
     @task
-    def load_weather_to_postgis(gdf: gpd.GeoDataFrame, conn_id: str = POSTGRES_CONN_ID):
+    def load_weather_to_postgis(weather_json_string: str, conn_id: str = POSTGRES_CONN_ID):
         """Loads a GeoDataFrame into a PostGIS table."""
+
+        # Convert the JSON string back to a GeoDataFrame 
+        gdf = gpd.read_file(weather_json_string)
+
         # Create a PostgresHook to connect to the database
         pg_hook = PostgresHook(postgres_conn_id=conn_id)
         engine = pg_hook.get_sqlalchemy_engine()
@@ -229,6 +234,8 @@ def arkansas_trail_current_weather_dag():
     weather_gdf = fetch_and_process_weather_data()
     load_weather_to_postgis(weather_gdf)
 
+# --- INSTANTIATE THE DAG ---
+arkansas_trail_current_weather_dag()
 
 # --- 3. MAIN EXECUTION ---
 # if __name__ == "__main__":
